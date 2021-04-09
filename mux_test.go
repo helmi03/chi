@@ -1219,11 +1219,11 @@ func TestServeHTTPExistingContext(t *testing.T) {
 	})
 
 	testcases := []struct {
+		Ctx            context.Context
 		Method         string
 		Path           string
-		Ctx            context.Context
-		ExpectedStatus int
 		ExpectedBody   string
+		ExpectedStatus int
 	}{
 		{
 			Method:         "GET",
@@ -1452,7 +1452,7 @@ func TestMuxWildcardRouteCheckTwo(t *testing.T) {
 
 func TestMuxRegexp(t *testing.T) {
 	r := NewRouter()
-	r.Route("/{param:[0-9]+}/test", func(r Router) {
+	r.Route("/{param:[0-9]*}/test", func(r Router) {
 		r.Get("/", func(w http.ResponseWriter, r *http.Request) {
 			w.Write([]byte(fmt.Sprintf("Hi: %s", URLParam(r, "param"))))
 		})
@@ -1519,6 +1519,38 @@ func TestMuxRegexp3(t *testing.T) {
 		t.Fatalf(body)
 	}
 	if _, body := testRequest(t, ts, "DELETE", "/one/123", nil); body != "forth" {
+		t.Fatalf(body)
+	}
+}
+
+func TestMuxSubrouterWildcardParam(t *testing.T) {
+	h := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprintf(w, "param:%v *:%v", URLParam(r, "param"), URLParam(r, "*"))
+	})
+
+	r := NewRouter()
+
+	r.Get("/bare/{param}", h)
+	r.Get("/bare/{param}/*", h)
+
+	r.Route("/case0", func(r Router) {
+		r.Get("/{param}", h)
+		r.Get("/{param}/*", h)
+	})
+
+	ts := httptest.NewServer(r)
+	defer ts.Close()
+
+	if _, body := testRequest(t, ts, "GET", "/bare/hi", nil); body != "param:hi *:" {
+		t.Fatalf(body)
+	}
+	if _, body := testRequest(t, ts, "GET", "/bare/hi/yes", nil); body != "param:hi *:yes" {
+		t.Fatalf(body)
+	}
+	if _, body := testRequest(t, ts, "GET", "/case0/hi", nil); body != "param:hi *:" {
+		t.Fatalf(body)
+	}
+	if _, body := testRequest(t, ts, "GET", "/case0/hi/yes", nil); body != "param:hi *:yes" {
 		t.Fatalf(body)
 	}
 }
@@ -1598,6 +1630,32 @@ func TestEscapedURLParams(t *testing.T) {
 	}
 }
 
+func TestCustomHTTPMethod(t *testing.T) {
+	// first we must register this method to be accepted, then we
+	// can define method handlers on the router below
+	RegisterMethod("BOO")
+
+	r := NewRouter()
+	r.Get("/", func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte("."))
+	})
+
+	// note the custom BOO method for route /hi
+	r.MethodFunc("BOO", "/hi", func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte("custom method"))
+	})
+
+	ts := httptest.NewServer(r)
+	defer ts.Close()
+
+	if _, body := testRequest(t, ts, "GET", "/", nil); body != "." {
+		t.Fatalf(body)
+	}
+	if _, body := testRequest(t, ts, "BOO", "/hi", nil); body != "custom method" {
+		t.Fatalf(body)
+	}
+}
+
 func TestMuxMatch(t *testing.T) {
 	r := NewRouter()
 	r.Get("/hi", func(w http.ResponseWriter, r *http.Request) {
@@ -1651,7 +1709,12 @@ func TestServerBaseContext(t *testing.T) {
 
 	// Setup http Server with a base context
 	ctx := context.WithValue(context.Background(), ctxKey{"base"}, "yes")
-	ts := httptest.NewServer(ServerBaseContext(ctx, r))
+	ts := httptest.NewUnstartedServer(r)
+	ts.Config.BaseContext = func(_ net.Listener) context.Context {
+		return ctx
+	}
+	ts.Start()
+
 	defer ts.Close()
 
 	if _, body := testRequest(t, ts, "GET", "/", nil); body != "yes" {
@@ -1756,6 +1819,7 @@ func BenchmarkMux(b *testing.B) {
 	mx.Get("/", h1)
 	mx.Get("/hi", h2)
 	mx.Get("/sup/{id}/and/{this}", h3)
+	mx.Get("/sup/{id}/{bar:foo}/{this}", h3)
 
 	mx.Route("/sharing/{x}/{hash}", func(mx Router) {
 		mx.Get("/", h4)          // subrouter-1
@@ -1771,6 +1835,7 @@ func BenchmarkMux(b *testing.B) {
 		"/",
 		"/hi",
 		"/sup/123/and/this",
+		"/sup/123/foo/this",
 		"/sharing/z/aBc",                 // subrouter-1
 		"/sharing/z/aBc/twitter",         // subrouter-1
 		"/sharing/z/aBc/direct",          // subrouter-2

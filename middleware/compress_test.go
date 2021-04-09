@@ -11,7 +11,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/go-chi/chi"
+	"github.com/go-chi/chi/v5"
 )
 
 func TestCompressor(t *testing.T) {
@@ -53,8 +53,8 @@ func TestCompressor(t *testing.T) {
 	tests := []struct {
 		name              string
 		path              string
-		acceptedEncodings []string
 		expectedEncoding  string
+		acceptedEncodings []string
 	}{
 		{
 			name:              "no expected encodings due to no accepted encodings",
@@ -114,10 +114,10 @@ func TestCompressor(t *testing.T) {
 func TestCompressorWildcards(t *testing.T) {
 	tests := []struct {
 		name       string
+		recover    string
 		types      []string
 		typesCount int
 		wcCount    int
-		recover    string
 	}{
 		{
 			name:       "defaults",
